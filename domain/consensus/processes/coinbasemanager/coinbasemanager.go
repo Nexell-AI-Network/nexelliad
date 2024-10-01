@@ -9,7 +9,9 @@ import (
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/utils/hashset"
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/utils/subnetworks"
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/utils/transactionhelper"
+	"github.com/Nexellia-Network/nexelliad/domain/consensus/utils/txscript"
 	"github.com/Nexellia-Network/nexelliad/infrastructure/db/database"
+	"github.com/Nexellia-Network/nexelliad/util"
 	"github.com/pkg/errors"
 )
 
@@ -59,25 +61,50 @@ func (c *coinbaseManager) ExpectedCoinbaseTransaction(stagingArea *model.Staging
 
 	txOuts := make([]*externalapi.DomainTransactionOutput, 0, len(ghostdagData.MergeSetBlues()))
 	acceptanceDataMap := acceptanceDataFromArrayToMap(acceptanceData)
-	for _, blue := range ghostdagData.MergeSetBlues() {
-		txOut, hasReward, err := c.coinbaseOutputForBlueBlock(stagingArea, blue, acceptanceDataMap[*blue], daaAddedBlocksSet)
+	if constants.BlockVersion == 1 {
+		for _, blue := range ghostdagData.MergeSetBlues() {
+			txOut, hasReward, err := c.coinbaseOutputForBlueBlockV1(stagingArea, blue, acceptanceDataMap[*blue], daaAddedBlocksSet)
+			if err != nil {
+				return nil, false, err
+			}
+
+			if hasReward {
+				txOuts = append(txOuts, txOut)
+			}
+		}
+
+		txOut, hasRedReward, err := c.coinbaseOutputForRewardFromRedBlocksV1(
+			stagingArea, ghostdagData, acceptanceData, daaAddedBlocksSet, coinbaseData)
 		if err != nil {
 			return nil, false, err
 		}
 
-		if hasReward {
+		if hasRedReward {
 			txOuts = append(txOuts, txOut)
 		}
-	}
+	} else if constants.BlockVersion == 2 {
+		for _, blue := range ghostdagData.MergeSetBlues() {
+			txOut, devTx, hasReward, err := c.coinbaseOutputForBlueBlockV2(stagingArea, blue, acceptanceDataMap[*blue], daaAddedBlocksSet)
+			if err != nil {
+				return nil, false, err
+			}
 
-	txOut, hasRedReward, err := c.coinbaseOutputForRewardFromRedBlocks(
-		stagingArea, ghostdagData, acceptanceData, daaAddedBlocksSet, coinbaseData)
-	if err != nil {
-		return nil, false, err
-	}
+			if hasReward {
+				txOuts = append(txOuts, txOut)
+				txOuts = append(txOuts, devTx)
+			}
+		}
 
-	if hasRedReward {
-		txOuts = append(txOuts, txOut)
+		txOut, devTx, hasRedReward, err := c.coinbaseOutputForRewardFromRedBlocksV2(
+			stagingArea, ghostdagData, acceptanceData, daaAddedBlocksSet, coinbaseData)
+		if err != nil {
+			return nil, false, err
+		}
+
+		if hasRedReward {
+			txOuts = append(txOuts, txOut)
+			txOuts = append(txOuts, devTx)
+		}
 	}
 
 	subsidy, err := c.CalcBlockSubsidy(stagingArea, blockHash)
@@ -90,7 +117,7 @@ func (c *coinbaseManager) ExpectedCoinbaseTransaction(stagingArea *model.Staging
 		return nil, false, err
 	}
 
-	return &externalapi.DomainTransaction{
+	domainTransaction := &externalapi.DomainTransaction{
 		Version:      constants.MaxTransactionVersion,
 		Inputs:       []*externalapi.DomainTransactionInput{},
 		Outputs:      txOuts,
@@ -98,7 +125,8 @@ func (c *coinbaseManager) ExpectedCoinbaseTransaction(stagingArea *model.Staging
 		SubnetworkID: subnetworks.SubnetworkIDCoinbase,
 		Gas:          0,
 		Payload:      payload,
-	}, hasRedReward, nil
+	}
+	return domainTransaction, hasRedReward, nil
 }
 
 func (c *coinbaseManager) daaAddedBlocksSet(stagingArea *model.StagingArea, blockHash *externalapi.DomainHash) (
@@ -114,7 +142,49 @@ func (c *coinbaseManager) daaAddedBlocksSet(stagingArea *model.StagingArea, bloc
 
 // coinbaseOutputForBlueBlock calculates the output that should go into the coinbase transaction of blueBlock
 // If blueBlock gets no fee - returns nil for txOut
-func (c *coinbaseManager) coinbaseOutputForBlueBlock(stagingArea *model.StagingArea,
+func (c *coinbaseManager) coinbaseOutputForBlueBlockV2(stagingArea *model.StagingArea,
+	blueBlock *externalapi.DomainHash, blockAcceptanceData *externalapi.BlockAcceptanceData,
+	mergingBlockDAAAddedBlocksSet hashset.HashSet) (*externalapi.DomainTransactionOutput, *externalapi.DomainTransactionOutput, bool, error) {
+
+	blockReward, err := c.calcMergedBlockReward(stagingArea, blueBlock, blockAcceptanceData, mergingBlockDAAAddedBlocksSet)
+	if err != nil {
+		return nil, nil, false, err
+	}
+
+	devFeeDecodedAddress, err := util.DecodeAddress(constants.DevFeeAddress, util.Bech32PrefixKaspa)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	devFeeScriptPublicKey, err := txscript.PayToAddrScript(devFeeDecodedAddress)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	devFeeQuantity := uint64(float64(constants.DevFee) / 100 * float64(blockReward))
+	blockReward -= devFeeQuantity
+	if blockReward <= 0 {
+		return nil, nil, false, nil
+	}
+
+	// the ScriptPublicKey for the coinbase is parsed from the coinbase payload
+	_, coinbaseData, _, err := c.ExtractCoinbaseDataBlueScoreAndSubsidy(blockAcceptanceData.TransactionAcceptanceData[0].Transaction)
+	if err != nil {
+		return nil, nil, false, err
+	}
+
+	txOut := &externalapi.DomainTransactionOutput{
+		Value:           blockReward,
+		ScriptPublicKey: coinbaseData.ScriptPublicKey,
+	}
+
+	devTx := &externalapi.DomainTransactionOutput{
+		Value:           devFeeQuantity,
+		ScriptPublicKey: devFeeScriptPublicKey,
+	}
+
+	return txOut, devTx, true, nil
+}
+
+func (c *coinbaseManager) coinbaseOutputForBlueBlockV1(stagingArea *model.StagingArea,
 	blueBlock *externalapi.DomainHash, blockAcceptanceData *externalapi.BlockAcceptanceData,
 	mergingBlockDAAAddedBlocksSet hashset.HashSet) (*externalapi.DomainTransactionOutput, bool, error) {
 
@@ -123,7 +193,7 @@ func (c *coinbaseManager) coinbaseOutputForBlueBlock(stagingArea *model.StagingA
 		return nil, false, err
 	}
 
-	if blockReward == 0 {
+	if blockReward <= 0 {
 		return nil, false, nil
 	}
 
@@ -141,7 +211,48 @@ func (c *coinbaseManager) coinbaseOutputForBlueBlock(stagingArea *model.StagingA
 	return txOut, true, nil
 }
 
-func (c *coinbaseManager) coinbaseOutputForRewardFromRedBlocks(stagingArea *model.StagingArea,
+func (c *coinbaseManager) coinbaseOutputForRewardFromRedBlocksV2(stagingArea *model.StagingArea,
+	ghostdagData *externalapi.BlockGHOSTDAGData, acceptanceData externalapi.AcceptanceData, daaAddedBlocksSet hashset.HashSet,
+	coinbaseData *externalapi.DomainCoinbaseData) (*externalapi.DomainTransactionOutput, *externalapi.DomainTransactionOutput, bool, error) {
+
+	acceptanceDataMap := acceptanceDataFromArrayToMap(acceptanceData)
+	totalReward := uint64(0)
+	for _, red := range ghostdagData.MergeSetReds() {
+		reward, err := c.calcMergedBlockReward(stagingArea, red, acceptanceDataMap[*red], daaAddedBlocksSet)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		totalReward += reward
+	}
+
+	devFeeDecodedAddress, err := util.DecodeAddress(constants.DevFeeAddress, util.Bech32PrefixKaspa)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	devFeeScriptPublicKey, err := txscript.PayToAddrScript(devFeeDecodedAddress)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	devFeeQuantity := uint64(float64(constants.DevFee) / 100 * float64(totalReward))
+	totalReward -= devFeeQuantity
+	if totalReward <= 0 {
+		return nil, nil, false, nil
+	}
+
+	txOut := &externalapi.DomainTransactionOutput{
+		Value:           totalReward,
+		ScriptPublicKey: coinbaseData.ScriptPublicKey,
+	}
+
+	devTx := &externalapi.DomainTransactionOutput{
+		Value:           devFeeQuantity,
+		ScriptPublicKey: devFeeScriptPublicKey,
+	}
+
+	return txOut, devTx, true, nil
+}
+
+func (c *coinbaseManager) coinbaseOutputForRewardFromRedBlocksV1(stagingArea *model.StagingArea,
 	ghostdagData *externalapi.BlockGHOSTDAGData, acceptanceData externalapi.AcceptanceData, daaAddedBlocksSet hashset.HashSet,
 	coinbaseData *externalapi.DomainCoinbaseData) (*externalapi.DomainTransactionOutput, bool, error) {
 
@@ -152,18 +263,18 @@ func (c *coinbaseManager) coinbaseOutputForRewardFromRedBlocks(stagingArea *mode
 		if err != nil {
 			return nil, false, err
 		}
-
 		totalReward += reward
 	}
-
-	if totalReward == 0 {
+	if totalReward <= 0 {
 		return nil, false, nil
 	}
 
-	return &externalapi.DomainTransactionOutput{
+	txOut := &externalapi.DomainTransactionOutput{
 		Value:           totalReward,
 		ScriptPublicKey: coinbaseData.ScriptPublicKey,
-	}, true, nil
+	}
+
+	return txOut, true, nil
 }
 
 func acceptanceDataFromArrayToMap(acceptanceData externalapi.AcceptanceData) map[externalapi.DomainHash]*externalapi.BlockAcceptanceData {
@@ -195,51 +306,38 @@ func (c *coinbaseManager) CalcBlockSubsidy(stagingArea *model.StagingArea, block
 }
 
 func (c *coinbaseManager) calcHalvingPeriodBlockSubsidy(blockDaaScore uint64) uint64 {
-	// We define a year as 365.25 days and a month as 365.25 / 12 = 30.4375
+	// We define a year as 365.25 days and a year as 365.25 / 12 = 30.4375
 	// secondsPerMonth = 30.4375 * 24 * 60 * 60 = 2629800
-	// secondsPerHalving = 2629800 * 12
-	const secondsPerHalving = 31557600
+	// secondsPerYear = 2629800 * 12
+	const secondsPerYear = 31557600
 	// Note that this calculation implicitly assumes that block per second = 1 (by assuming daa score diff is in second units).
-	monthsSinceHalvingPhaseStarted := (blockDaaScore - c.halvingPhaseDaaScore) / secondsPerHalving
-	// monthsSinceHalvingHalvingPhaseStarted := (blockDaaScore - c.halvingPhaseDaaScore) / secondsPerMonth
-	// Return the pre-calculated value from subsidy-per-month table
-	return c.getHalvingPeriodBlockSubsidyFromTable(monthsSinceHalvingPhaseStarted)
+	yearsSinceHalvingPhaseStarted := (blockDaaScore - c.halvingPhaseDaaScore) / secondsPerYear
+	// yearsSinceHalvingHalvingPhaseStarted := (blockDaaScore - c.halvingPhaseDaaScore) / secondsPerYear
+	// Return the pre-calculated value from subsidy-per-year table
+	return c.getHalvingPeriodBlockSubsidyFromTable(yearsSinceHalvingPhaseStarted)
 }
 
 /*
-This table was pre-calculated by calling `calcHalvingPeriodBlockSubsidyFloatCalc` for all months until reaching 0 subsidy.
+This table was pre-calculated by calling `calcHalvingPeriodBlockSubsidyFloatCalc` for all years until reaching 0 subsidy.
 To regenerate this table, run `TestBuildSubsidyTable` in coinbasemanager_test.go (note the `halvingPhaseBaseSubsidy` therein)
 */
-var subsidyByHalvingMonthTable = []uint64{
-	600000000, 600000000, 600000000, 600000000, 600000000, 600000000, 600000000, 600000000, 600000000, 600000000, 600000000, 600000000, 300000000, 300000000, 300000000, 300000000, 300000000, 300000000, 300000000, 300000000, 300000000, 300000000, 300000000, 300000000, 150000000,
-	150000000, 150000000, 150000000, 150000000, 150000000, 150000000, 150000000, 150000000, 150000000, 150000000, 150000000, 75000000, 75000000, 75000000, 75000000, 75000000, 75000000, 75000000, 75000000, 75000000, 75000000, 75000000, 75000000, 37500000, 37500000,
-	37500000, 37500000, 37500000, 37500000, 37500000, 37500000, 37500000, 37500000, 37500000, 37500000, 18750000, 18750000, 18750000, 18750000, 18750000, 18750000, 18750000, 18750000, 18750000, 18750000, 18750000, 18750000, 9375000, 9375000, 9375000,
-	9375000, 9375000, 9375000, 9375000, 9375000, 9375000, 9375000, 9375000, 9375000, 4687500, 4687500, 4687500, 4687500, 4687500, 4687500, 4687500, 4687500, 4687500, 4687500, 4687500, 4687500, 2343750, 2343750, 2343750, 2343750,
-	2343750, 2343750, 2343750, 2343750, 2343750, 2343750, 2343750, 2343750, 1171875, 1171875, 1171875, 1171875, 1171875, 1171875, 1171875, 1171875, 1171875, 1171875, 1171875, 1171875, 5859375, 5859375, 5859375, 5859375, 5859375,
-	5859375, 5859375, 5859375, 5859375, 5859375, 5859375, 5859375, 2929688, 2929688, 2929688, 2929688, 2929688, 2929688, 2929688, 2929688, 2929688, 2929688, 2929688, 2929688, 1464844, 1464844, 1464844, 1464844, 1464844, 1464844,
-	1464844, 1464844, 1464844, 1464844, 1464844, 1464844, 732422, 732422, 732422, 732422, 732422, 732422, 732422, 732422, 732422, 732422, 732422, 732422, 366211, 366211, 366211, 366211, 366211, 366211, 366211,
-	366211, 366211, 366211, 366211, 366211, 183105, 183105, 183105, 183105, 183105, 183105, 183105, 183105, 183105, 183105, 183105, 183105, 91553, 91553, 91553, 91553, 91553, 91553, 91553, 91553,
-	91553, 91553, 91553, 91553, 45776, 45776, 45776, 45776, 45776, 45776, 45776, 45776, 45776, 45776, 45776, 45776, 22888, 22888, 22888, 22888, 22888, 22888, 22888, 22888, 22888,
-	22888, 22888, 22888, 11444, 11444, 11444, 11444, 11444, 11444, 11444, 11444, 11444, 11444, 11444, 11444, 5722, 5722, 5722, 5722, 5722, 5722, 5722, 5722, 5722, 5722,
-	5722, 5722, 2861, 2861, 2861, 2861, 2861, 2861, 2861, 2861, 2861, 2861, 2861, 2861, 1431, 1431, 1431, 1431, 1431, 1431, 1431, 1431, 1431, 1431, 1431,
-	1431, 715, 715, 715, 715, 715, 715, 715, 715, 715, 715, 715, 715, 358, 358, 358, 358, 358, 358, 358, 358, 358, 358, 358, 358,
-	179, 179, 179, 179, 179, 179, 179, 179, 179, 179, 179, 179, 89, 89, 89, 89, 89, 89, 89, 89, 89, 89, 89, 89, 45,
-	45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 22, 11, 11,
-	11, 11, 11, 11, 11, 11, 11, 11, 11, 11, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 3, 3, 3,
-	3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-	0,
+var subsidyByHalvingYearTable = []uint64{
+	600000000, 300000000, 150000000, 75000000, 37500000, 18750000, 
+	9375000, 4687500, 2343750, 1171875, 585937, 292968, 146484, 
+	73242, 36621, 18310, 9155, 4577, 2288, 1144, 572, 
+	286, 143, 71, 35, 17, 8, 4, 2, 1, 0,
 }
 
-func (c *coinbaseManager) getHalvingPeriodBlockSubsidyFromTable(month uint64) uint64 {
-	if month >= uint64(len(subsidyByHalvingMonthTable)) {
-		month = uint64(len(subsidyByHalvingMonthTable) - 1)
+func (c *coinbaseManager) getHalvingPeriodBlockSubsidyFromTable(year uint64) uint64 {
+	if year >= uint64(len(subsidyByHalvingYearTable)) {
+		year = uint64(len(subsidyByHalvingYearTable) - 1)
 	}
-	return subsidyByHalvingMonthTable[month]
+	return subsidyByHalvingYearTable[year]
 }
 
-func (c *coinbaseManager) calcHalvingPeriodBlockSubsidyFloatCalc(month uint64) uint64 {
+func (c *coinbaseManager) calcHalvingPeriodBlockSubsidyFloatCalc(year uint64) uint64 {
 	baseSubsidy := c.halvingPhaseBaseSubsidy
-	subsidy := float64(baseSubsidy) / math.Pow(2, float64(month)/12)
+	subsidy := float64(baseSubsidy) / math.Pow(2, float64(year))
 	return uint64(subsidy)
 }
 

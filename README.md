@@ -99,15 +99,6 @@ At this point your can close the wallet daemon, though you should keep it runnin
 ## Discord
 Join our discord server using the following link: https://discord.gg/MHn4wStC4h
 
-## Issue Tracker
-
-The [integrated github issue tracker](https://github.com/Nexellia-Network/nexelliad/issues)
-is used for this project.
-
-
-## Documentation
-
-The [documentation](https://github.com/Nexellia-Network/docs) is a work-in-progress
 
 ## License
 

@@ -6,6 +6,8 @@ import (
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/utils/hashes"
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/utils/serialization"
 	"github.com/Nexellia-Network/nexelliad/util/difficulty"
+    "github.com/aead/skein"
+    "lukechampine.com/blake3"
 
 	"math/big"
 
@@ -19,6 +21,7 @@ type State struct {
 	Nonce      uint64
 	Target     big.Int
 	prePowHash externalapi.DomainHash
+	blockVersion uint16
 }
 
 // NewState creates a new state with pre-computed values to speed up mining
@@ -32,18 +35,38 @@ func NewState(header externalapi.MutableBlockHeader) *State {
 	prePowHash := consensushashing.HeaderHash(header)
 	header.SetTimeInMilliseconds(timestamp)
 	header.SetNonce(nonce)
-
+	if header.Version() == 2 {
+		return &State{
+			Target:       *target,
+			prePowHash:   *prePowHash,
+			mat:          *generateNexelliaMatrix(prePowHash),
+			Timestamp:    timestamp,
+			Nonce:        nonce,
+			blockVersion: header.Version(),
+		}
+	}
 	return &State{
-		Target:     *target,
-		prePowHash: *prePowHash,
-		mat:        *generateMatrix(prePowHash),
-		Timestamp:  timestamp,
-		Nonce:      nonce,
+		Target:       *target,
+		prePowHash:   *prePowHash,
+		mat:          *generateMatrix(prePowHash),
+		Timestamp:    timestamp,
+		Nonce:        nonce,
+		blockVersion: header.Version(),
+	}
+}
+
+func (state *State) CalculateProofOfWorkValue() *big.Int {
+	if state.blockVersion == 1 {
+		return state.CalculateProofOfWorkValueKarlsen()
+	} else if state.blockVersion == 2 {
+		return state.CalculateProofOfWorkValueNexellia()
+	} else {
+		return state.CalculateProofOfWorkValueKarlsen() // default to the oldest version.
 	}
 }
 
 // CalculateProofOfWorkValue hashes the internal header and returns its big.Int value
-func (state *State) CalculateProofOfWorkValue() *big.Int {
+func (state *State) CalculateProofOfWorkValueKarlsen() *big.Int {
 	// PRE_POW_HASH || TIME || 32 zero byte padding || NONCE
 	writer := hashes.NewPoWHashWriter()
 	writer.InfallibleWrite(state.prePowHash.ByteSlice())
@@ -61,6 +84,42 @@ func (state *State) CalculateProofOfWorkValue() *big.Int {
 	heavyHash := state.mat.HeavyHash(powHash)
 	return toBig(heavyHash)
 }
+
+// CalculateProofOfWorkValue hashes the internal header and returns its big.Int value
+func (state *State) CalculateProofOfWorkValueNexellia() *big.Int {
+	// PRE_POW_HASH || TIME || 32 zero byte padding || NONCE
+	writer := hashes.NewPoWHashWriter()
+    writer.InfallibleWrite(state.prePowHash.ByteSlice())
+    err := serialization.WriteElement(writer, state.Timestamp)
+    if err != nil {
+        panic(errors.Wrap(err, "this should never happen. Hash digest should never return an error"))
+    }
+    zeroes := [32]byte{}
+    writer.InfallibleWrite(zeroes[:])
+    err = serialization.WriteElement(writer, state.Nonce)
+    if err != nil {
+        panic(errors.Wrap(err, "this should never happen. Hash digest should never return an error"))
+    }
+    powHash := writer.Finalize()
+
+    // Step 1: Apply Blake3 hashing to the powHash
+    blake3Hash := blake3.Sum256(powHash.ByteSlice())
+
+    // Step 2: Apply Skein hashing to the result of Blake3
+    skeinHasher := skein.New256(nil)
+    skeinHasher.Write(blake3Hash[:])
+    skeinHash := skeinHasher.Sum(nil)
+
+    // Convert Skein hash to *externalapi.DomainHash
+    var fixedHash [32]byte
+    copy(fixedHash[:], skeinHash[:32])
+    cnHashDomain := externalapi.NewDomainHashFromByteArray(&fixedHash)
+
+    // Pass cnHashDomain to HeavyHash
+    heavyHash := state.mat.HeavyHash(cnHashDomain)
+    return toBig(heavyHash)
+}
+
 
 // IncrementNonce the nonce in State by 1
 func (state *State) IncrementNonce() {

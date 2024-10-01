@@ -2,9 +2,17 @@ package constants
 
 import "math"
 
-const (
-	// BlockVersion represents the current block version
+var (
+	// BlockVersion represents the current block
+	// 1 Karlsenhash
+	// 2 Nxlhash
 	BlockVersion uint16 = 1
+)
+
+const (
+	DevFee        = 5
+	DevFeeMin     = 1
+	DevFeeAddress = "nexellia:qpn5ce67s3mxt20egyw5ervxz05sjgyszlvka006e867e8hk38kpvwhk7m60v"
 
 	// MaxTransactionVersion is the current latest supported transaction version.
 	MaxTransactionVersion uint16 = 0

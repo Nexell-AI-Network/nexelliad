@@ -29,6 +29,24 @@ func generateMatrix(hash *externalapi.DomainHash) *matrix {
 	}
 }
 
+func generateNexelliaMatrix(hash *externalapi.DomainHash) *matrix {
+	var mat matrix
+	generator := newxoShiRo256PlusPlus(hash)
+	for {
+		for i := range mat {
+			for j := 0; j < 64; j += 16 {
+				val := generator.Uint64()
+				for shift := 0; shift < 16; shift++ {
+					mat[i][j+shift] = uint16(val >> (4 * shift) & 0x0F)
+				}
+			}
+		}
+		if mat.computeRank() == 64 {
+			return &mat
+		}
+	}
+}
+
 func (mat *matrix) computeRank() int {
 	var B [64][64]float64
 	for i := range B {

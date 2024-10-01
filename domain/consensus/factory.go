@@ -349,6 +349,7 @@ func (f *factory) NewConsensus(config *Config, db infrastructuredatabase.Databas
 		config.MaxBlockParents,
 		config.TimestampDeviationTolerance,
 		config.TargetTimePerBlock,
+		config.POWScores,
 		config.MaxBlockLevel,
 
 		dbManager,
@@ -397,6 +398,7 @@ func (f *factory) NewConsensus(config *Config, db infrastructuredatabase.Databas
 	blockBuilder := blockbuilder.New(
 		dbManager,
 		genesisHash,
+		config.POWScores,
 
 		difficultyManager,
 		pastMedianTimeManager,

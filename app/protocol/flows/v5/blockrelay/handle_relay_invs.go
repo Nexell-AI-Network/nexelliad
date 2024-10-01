@@ -11,6 +11,7 @@ import (
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/model/externalapi"
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/ruleerrors"
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/utils/consensushashing"
+	"github.com/Nexellia-Network/nexelliad/domain/consensus/utils/constants"
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/utils/hashset"
 	"github.com/Nexellia-Network/nexelliad/infrastructure/config"
 	"github.com/Nexellia-Network/nexelliad/infrastructure/network/netadapter/router"
@@ -132,6 +133,21 @@ func (flow *handleRelayInvsFlow) start() error {
 		if exists {
 			log.Debugf("Aborting requesting block %s because it already exists", inv.Hash)
 			continue
+		}
+
+		if !flow.IsIBDRunning() {
+			daaScore := block.Header.DAAScore()
+			var version uint16 = 1
+			for _, powScore := range flow.Config().ActiveNetParams.POWScores {
+				if daaScore >= powScore {
+					version = version + 1
+				}
+			}
+			constants.BlockVersion = version
+			if block.Header.Version() != constants.BlockVersion {
+				log.Infof("Cannot process %s, Wrong block version %d, it should be %d", consensushashing.BlockHash(block), block.Header.Version(), constants.BlockVersion)
+				continue
+			}
 		}
 
 		err = flow.banIfBlockIsHeaderOnly(block)

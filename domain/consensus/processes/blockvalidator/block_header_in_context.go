@@ -7,6 +7,7 @@ import (
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/model/externalapi"
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/ruleerrors"
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/utils/consensushashing"
+	"github.com/Nexellia-Network/nexelliad/domain/consensus/utils/constants"
 	"github.com/Nexellia-Network/nexelliad/infrastructure/logger"
 	"github.com/pkg/errors"
 )
@@ -85,6 +86,7 @@ func (v *blockValidator) ValidateHeaderInContext(stagingArea *model.StagingArea,
 	if err != nil {
 		return err
 	}
+	v.updateBlockVersion(header)
 
 	err = v.checkBlueWork(stagingArea, blockHash, header)
 	if err != nil {
@@ -104,6 +106,23 @@ func (v *blockValidator) ValidateHeaderInContext(stagingArea *model.StagingArea,
 	}
 
 	return nil
+}
+
+func (v *blockValidator) updateBlockVersion(header externalapi.BlockHeader) {
+	var version uint16 = 1
+	daaScore := header.DAAScore()
+	if daaScore <= 0 {
+		return
+	}
+	if len(v.POWScores) <= 0 {
+		return
+	}
+	for _, powScore := range v.POWScores {
+		if daaScore >= powScore {
+			version = version + 1
+		}
+	}
+	constants.BlockVersion = version
 }
 
 func (v *blockValidator) hasValidatedHeader(stagingArea *model.StagingArea, blockHash *externalapi.DomainHash) (bool, error) {
