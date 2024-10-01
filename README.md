@@ -4,16 +4,16 @@ Nexelliad
 [![ISC License](http://img.shields.io/badge/license-ISC-blue.svg)](https://choosealicense.com/licenses/isc/)
 [![GoDoc](https://img.shields.io/badge/godoc-reference-blue.svg)](http://godoc.org/github.com/Nexellia-Network/nexelliad/)
 
-Nexelliad is the reference full node Nexellia implementation written in Go (golang).
+Nexelliad is the reference full node Nexell-AI implementation written in Go (golang).
 
-## What is Nexellia
+## What is Nexell-AI
 
-Nexellia is a fork of Kaspa with an ASIC resistance implementation
+Nexell-AI is a fork of Kaspa with an concept of Distributed Artificial Intelligence Network on BlockDAG. 
 Kaspa is an attempt at a proof-of-work cryptocurrency with instant confirmations and sub-second block times. It is based on [the PHANTOM protocol](https://eprint.iacr.org/2018/104.pdf), a generalization of Nakamoto consensus.
 
 ## Requirements
 
-Go 1.18 or later.
+Go 1.19 or later.
 
 ## Installation
 
@@ -31,7 +31,7 @@ $ go version
 - Run the following commands to obtain and install nexelliad including all dependencies:
 
 ```bash
-$ git clone https://github.com/Nexellia-Network/nexelliad/
+$ git clone https://github.com/Nexell-AI-Network/nexelliad/
 $ cd nexelliad
 $ go install . ./cmd/...
 ```
