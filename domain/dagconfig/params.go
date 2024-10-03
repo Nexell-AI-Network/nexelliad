@@ -284,10 +284,7 @@ var TestnetParams = Params{
 	Net:         appmessage.Testnet,
 	RPCPort:     "33555",
 	DefaultPort: "33556",
-	DNSSeeds: []string{
-		"testnet-dnsseed.nexell-ia.net",
-
-	},
+	DNSSeeds: []string{},
 
 	// DAG parameters
 	GenesisBlock:                   &testnetGenesisBlock,
@@ -340,6 +337,7 @@ var TestnetParams = Params{
 
 	MaxBlockLevel: 250,
 	MergeDepth:    defaultMergeDepth,
+	POWScores:     []uint64{100},
 }
 
 // SimnetParams defines the network parameters for the simulation test Kaspa
