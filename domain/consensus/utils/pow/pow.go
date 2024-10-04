@@ -87,8 +87,8 @@ func (state *State) CalculateProofOfWorkValueKarlsen() *big.Int {
 
 // CalculateProofOfWorkValue hashes the internal header and returns its big.Int value
 func (state *State) CalculateProofOfWorkValueNexellia() *big.Int {
-	// PRE_POW_HASH || TIME || 32 zero byte padding || NONCE
-	writer := hashes.NewPoWHashWriter()
+    // PRE_POW_HASH || TIME || 32 zero byte padding || NONCE
+    writer := hashes.NewPoWHashWriter()
     writer.InfallibleWrite(state.prePowHash.ByteSlice())
     err := serialization.WriteElement(writer, state.Timestamp)
     if err != nil {
@@ -102,12 +102,9 @@ func (state *State) CalculateProofOfWorkValueNexellia() *big.Int {
     }
     powHash := writer.Finalize()
 
-    // Step 1: Apply Blake3 hashing to the powHash
-    blake3Hash := blake3.Sum256(powHash.ByteSlice())
-
-    // Step 2: Apply Skein hashing to the result of Blake3
+    // Apply Skein hashing to powHash
     skeinHasher := skein.New256(nil)
-    skeinHasher.Write(blake3Hash[:])
+    skeinHasher.Write(powHash.ByteSlice()) 
     skeinHash := skeinHasher.Sum(nil)
 
     // Convert Skein hash to *externalapi.DomainHash
