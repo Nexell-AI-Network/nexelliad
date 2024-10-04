@@ -7,7 +7,6 @@ import (
 	"github.com/Nexellia-Network/nexelliad/domain/consensus/utils/serialization"
 	"github.com/Nexellia-Network/nexelliad/util/difficulty"
     "github.com/aead/skein"
-    "lukechampine.com/blake3"
 
 	"math/big"
 
