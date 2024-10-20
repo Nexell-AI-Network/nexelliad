@@ -274,7 +274,7 @@ var MainnetParams = Params{
 	// This means that any block that has a level lower or equal to genesis will be level 0.
 	MaxBlockLevel: 225,
 	MergeDepth:    defaultMergeDepth,
-	POWScores:     []uint64{22895000},
+	POWScores:     []uint64{22935000},
 }
 
 // TestnetParams defines the network parameters for the test Kaspa network.
