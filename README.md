@@ -32,7 +32,7 @@ $ go version
 - Run the following commands to obtain and install nexelliad including all dependencies:
 
 ```bash
-$ git clone https://github.com/Nexell-AI-Network/nexelliad/v2/
+$ git clone https://github.com/Nexell-AI-Network/nexelliad.git
 $ cd nexelliad
 $ go install . ./cmd/...
 ```
