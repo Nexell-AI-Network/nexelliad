@@ -20,7 +20,7 @@ import (
 
 func isPeerAllowed(address string) bool {
     // Liste des IP autorisées (sans ports)
-    allowedPeers := []string{"162.55.131.20"}
+    allowedPeers := []string{"49.12.173.49"}
 
     // Extraire uniquement l'IP (en ignorant le port)
     host, _, err := net.SplitHostPort(address)
